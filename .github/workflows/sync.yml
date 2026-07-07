@@ -1,0 +1,48 @@
+name: Wahoo to Garmin Sync
+
+on:
+  schedule:
+    # 每15分钟运行一次（可根据需要调整）
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+    # 支持手动触发
+
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+        
+    - name: Install dependencies
+      run: |
+        pip install garminconnect dropbox python-dotenv
+        
+    - name: Run sync script
+      env:
+        GARMIN_EMAIL: ${{ secrets.GARMIN_EMAIL }}
+        GARMIN_PASSWORD: ${{ secrets.GARMIN_PASSWORD }}
+        DROPBOX_ACCESS_TOKEN: ${{ secrets.DROPBOX_ACCESS_TOKEN }}
+        DROPBOX_FOLDER: ${{ secrets.DROPBOX_FOLDER }}
+        GARMIN_REGION: ${{ secrets.GARMIN_REGION }}
+      run: |
+        python sync.py
+        
+    - name: Save processed files tracking
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: sync-state
+        path: sync_state.json
+        retention-days: 30
