@@ -74,10 +74,7 @@ class GarminUploader:
         
     def login(self):
         try:
-            if self.region == 'china':
-                self.client = Garmin(self.email, self.password, is_cn=True)
-            else:
-                self.client = Garmin(self.email, self.password)
+            self.client = Garmin(self.email, self.password)
             self.client.login()
             print(f"Garmin Connect login successful (region: {self.region})")
             return True
