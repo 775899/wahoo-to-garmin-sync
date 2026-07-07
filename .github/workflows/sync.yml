@@ -37,7 +37,7 @@ jobs:
         name: sync-state
         path: .
         
-      - name: Run sync script
+    - name: Run sync script
       env:
         GARMIN_EMAIL: ${{ secrets.GARMIN_EMAIL }}
         GARMIN_PASSWORD: ${{ secrets.GARMIN_PASSWORD }}
