@@ -83,12 +83,22 @@ class GarminUploader:
             return False
     
     def upload_activity(self, file_data, filename):
+        """Upload activity to Garmin Connect (save bytes to temp file first)"""
         if not self.client:
             if not self.login():
                 return False
         
+        import tempfile
+        temp_path = None
         try:
-            response = self.client.upload_activity(file_data)
+            # Garmin library needs file path, not bytes
+            suffix = os.path.splitext(filename)\[1] or '.fit'
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                tmp.write(file_data)
+                temp_path = tmp.name
+            
+            response = self.client.upload_activity(temp_path)
+            
             if response:
                 print(f"  Upload successful: {filename}")
                 print(f"    Activity ID: {response}")
@@ -96,18 +106,26 @@ class GarminUploader:
             else:
                 print(f"  Upload failed: {filename} (no response)")
                 return False
+                
         except Exception as e:
             error_str = str(e)
             print(f"  Upload failed: {filename} - {e}")
+            
             if 'already' in error_str.lower() or 'duplicate' in error_str.lower():
                 print(f"  -> Activity already exists in Garmin Connect, skipping")
                 return True
+            
             if 'login' in error_str.lower() or 'auth' in error_str.lower() or '429' in error_str:
                 print("  -> Retrying login...")
                 self.client = None
                 time.sleep(3)
                 return self.upload_activity(file_data, filename)
             return False
+            
+        finally:
+            # Clean up temp file
+            if temp_path and os.path.exists(temp_path):
+                os.unlink(temp_path)
 
 class DropboxManager:
     def __init__(self):
