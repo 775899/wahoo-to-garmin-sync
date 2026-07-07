@@ -2,8 +2,8 @@ name: Wahoo to Garmin Sync
 
 on:
   schedule:
-    # 每15分钟运行一次（可根据需要调整）
-    - cron: '*/15 * * * *'
+    # 每小时运行一次（避免Garmin IP限流，节省Actions免费额度）
+    - cron: '0 * * * *'
   workflow_dispatch:
     # 支持手动触发
 
@@ -27,7 +27,15 @@ jobs:
         
     - name: Install dependencies
       run: |
-        pip install garminconnect dropbox python-dotenv
+        pip install -r requirements.txt
+        
+    # 恢复上次同步状态（去重用）
+    - name: Download previous sync state
+      uses: actions/download-artifact@v4
+      continue-on-error: true
+      with:
+        name: sync-state
+        path: .
         
     - name: Run sync script
       env:
@@ -45,4 +53,4 @@ jobs:
       with:
         name: sync-state
         path: sync_state.json
-        retention-days: 30
+        retention-days: 90
