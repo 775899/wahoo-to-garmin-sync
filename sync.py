@@ -8,6 +8,9 @@ from garminconnect import Garmin
 import dropbox
 from dropbox.files import WriteMode
 
+# 支持的活动文件格式
+SUPPORTED_FORMATS = ('.fit', '.gpx', '.tcx')
+
 # ========== 配置 ==========
 class Config:
     # Garmin 账号配置（从环境变量/Secrets读取）
@@ -15,13 +18,15 @@ class Config:
     GARMIN_PASSWORD = os.getenv('GARMIN_PASSWORD')
     
     # Garmin 区域设置："international" 或 "china"
-    # 国区账号用 "china"，国际区用 "international"
     GARMIN_REGION = os.getenv('GARMIN_REGION', 'international')
     
     # Dropbox 配置
     DROPBOX_ACCESS_TOKEN = os.getenv('DROPBOX_ACCESS_TOKEN')
-    # Wahoo 默认上传到 Dropbox 的路径
+    # Wahoo 上传到 Dropbox 的路径
     DROPBOX_FOLDER = os.getenv('DROPBOX_FOLDER', '/Apps/Wahoo Fitness')
+    
+    # 是否递归搜索子文件夹（Wahoo可能按日期建子目录）
+    RECURSIVE_SEARCH = os.getenv('RECURSIVE_SEARCH', 'true').lower() == 'true'
     
     # 同步状态文件
     STATE_FILE = 'sync_state.json'
@@ -86,14 +91,7 @@ class GarminUploader:
     def login(self):
         """登录 Garmin Connect"""
         try:
-            # 根据区域选择不同的 Garmin Connect 域名
-            if self.region == 'china':
-                # 国区账号
-                self.client = Garmin(self.email, self.password)
-            else:
-                # 国际区账号
-                self.client = Garmin(self.email, self.password)
-            
+            self.client = Garmin(self.email, self.password)
             self.client.login()
             print(f"✓ Garmin Connect 登录成功 (区域: {self.region})")
             return True
@@ -109,7 +107,6 @@ class GarminUploader:
                 return False
         
         try:
-            # 上传文件
             response = self.client.upload_activity(file_data)
             
             if response:
@@ -121,11 +118,19 @@ class GarminUploader:
                 return False
                 
         except Exception as e:
+            error_str = str(e)
             print(f"  ✗ 上传失败: {filename} - {e}")
-            # 如果登录过期，尝试重新登录
-            if 'login' in str(e).lower() or 'auth' in str(e).lower():
+            
+            # 活动已存在的错误，视为成功
+            if 'already' in error_str.lower() or 'duplicate' in error_str.lower():
+                print(f"  → 活动已存在于 Garmin Connect，跳过")
+                return True
+            
+            # 登录过期，尝试重新登录
+            if 'login' in error_str.lower() or 'auth' in error_str.lower() or '429' in error_str:
                 print("  → 尝试重新登录...")
                 self.client = None
+                time.sleep(3)
                 return self.upload_activity(file_data, filename)
             return False
 
@@ -146,23 +151,54 @@ class DropboxManager:
             print(f"✗ Dropbox 连接失败: {e}")
             return False
     
-    def list_fit_files(self, folder_path):
-        """列出 Dropbox 文件夹中的 .fit 文件"""
+    def list_activity_files(self, folder_path, recursive=True):
+        """列出 Dropbox 文件夹中的活动文件（.fit/.gpx/.tcx）"""
         if not self.dbx:
             if not self.connect():
                 return []
         
         try:
-            result = self.dbx.files_list_folder(folder_path)
-            fit_files = [
-                entry for entry in result.entries 
-                if isinstance(entry, dropbox.files.FileMetadata) 
-                and entry.name.endswith('.fit')
-            ]
-            return fit_files
+            activity_files = []
+            result = self.dbx.files_list_folder(folder_path, recursive=recursive)
             
+            while True:
+                for entry in result.entries:
+                    if isinstance(entry, dropbox.files.FileMetadata):
+                        if entry.name.lower().endswith(SUPPORTED_FORMATS):
+                            activity_files.append(entry)
+                
+                if not result.has_more:
+                    break
+                result = self.dbx.files_list_folder_continue(result.cursor)
+            
+            return activity_files
+            
+        except dropbox.exceptions.ApiError as e:
+            if 'not_found' in str(e).lower() or 'path' in str(e).lower():
+                print(f"✗ Dropbox 文件夹不存在: {folder_path}")
+                print(f"  请确认 Wahoo App 已连接 Dropbox 并上传过活动文件")
+                print(f"  请检查 GitHub Secret DROPBOX_FOLDER 的路径是否正确")
+            else:
+                print(f"✗ 列出文件失败: {e}")
+            return []
         except Exception as e:
             print(f"✗ 列出文件失败: {e}")
+            return []
+    
+    def list_all_folders(self, root_path='/'):
+        """列出 Dropbox 根目录下的所有文件夹（帮助排查路径问题）"""
+        if not self.dbx:
+            return []
+        
+        try:
+            result = self.dbx.files_list_folder(root_path)
+            folders = [
+                entry.path_display 
+                for entry in result.entries 
+                if isinstance(entry, dropbox.files.FolderMetadata)
+            ]
+            return folders
+        except Exception:
             return []
     
     def download_file(self, file_path):
@@ -187,7 +223,14 @@ class DropboxManager:
                 name, ext = os.path.splitext(filename)
                 to_path = f"{to_folder}/{name}_{timestamp}{ext}"
             except dropbox.exceptions.ApiError:
-                pass  # 文件不存在，可以正常移动
+                pass
+            
+            # 确保目标文件夹存在
+            try:
+                self.dbx.files_get_metadata(to_folder)
+            except dropbox.exceptions.ApiError:
+                self.dbx.files_create_folder_v2(to_folder)
+                print(f"  → 创建已处理文件夹: {to_folder}")
             
             self.dbx.files_move_v2(from_path, to_path)
             print(f"  → 文件已移动到: {to_path}")
@@ -207,38 +250,32 @@ class WahooToGarminSync:
         
     def validate_config(self):
         """验证配置是否完整"""
-        required = [
-            self.config.GARMIN_EMAIL,
-            self.config.GARMIN_PASSWORD,
-            self.config.DROPBOX_ACCESS_TOKEN
-        ]
+        required = {
+            'GARMIN_EMAIL': self.config.GARMIN_EMAIL,
+            'GARMIN_PASSWORD': self.config.GARMIN_PASSWORD,
+            'DROPBOX_ACCESS_TOKEN': self.config.DROPBOX_ACCESS_TOKEN,
+        }
         
-        if not all(required):
-            print("✗ 配置错误: 缺少必要的Secrets")
-            print("请确保已设置以下 GitHub Secrets:")
-            print("  - GARMIN_EMAIL")
-            print("  - GARMIN_PASSWORD")
-            print("  - DROPBOX_ACCESS_TOKEN")
+        missing = [k for k, v in required.items() if not v]
+        if missing:
+            print(f"✗ 配置错误: 缺少必要的Secrets: {', '.join(missing)}")
             return False
             
         return True
     
     def initialize(self):
         """初始化连接"""
+        # 初始化 Dropbox（先连Dropbox，因为如果文件夹为空就不需要登录Garmin）
+        self.dropbox = DropboxManager(self.config.DROPBOX_ACCESS_TOKEN)
+        if not self.dropbox.connect():
+            return False
+        
         # 初始化 Garmin
         self.garmin = GarminUploader(
             self.config.GARMIN_EMAIL,
             self.config.GARMIN_PASSWORD,
             self.config.GARMIN_REGION
         )
-        
-        if not self.garmin.login():
-            return False
-        
-        # 初始化 Dropbox
-        self.dropbox = DropboxManager(self.config.DROPBOX_ACCESS_TOKEN)
-        if not self.dropbox.connect():
-            return False
         
         return True
     
@@ -252,24 +289,52 @@ class WahooToGarminSync:
         
         print(f"\n{'='*50}")
         print(f"开始同步: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"Dropbox 路径: {self.config.DROPBOX_FOLDER}")
+        print(f"支持格式: {', '.join(SUPPORTED_FORMATS)}")
+        print(f"递归搜索: {'是' if self.config.RECURSIVE_SEARCH else '否'}")
         print(f"{'='*50}\n")
         
-        # 获取 Dropbox 中的 .fit 文件
-        fit_files = self.dropbox.list_fit_files(self.config.DROPBOX_FOLDER)
+        # 获取 Dropbox 中的活动文件
+        activity_files = self.dropbox.list_activity_files(
+            self.config.DROPBOX_FOLDER, 
+            recursive=self.config.RECURSIVE_SEARCH
+        )
         
-        if not fit_files:
-            print("ℹ 没有找到新的 .fit 文件")
+        if not activity_files:
+            print("ℹ 没有找到新的活动文件")
+            print("\n排查信息:")
+            
+            # 列出根目录下的文件夹，帮助排查路径问题
+            root_folders = self.dropbox.list_all_folders('/')
+            if root_folders:
+                print("  Dropbox 根目录下的文件夹:")
+                for folder in root_folders:
+                    print(f"    {folder}")
+            else:
+                print("  Dropbox 根目录下没有文件夹")
+            
+            # 尝试列出配置路径的子文件夹
+            sub_folders = self.dropbox.list_all_folders(self.config.DROPBOX_FOLDER)
+            if sub_folders:
+                print(f"\n  {self.config.DROPBOX_FOLDER} 下的子文件夹:")
+                for folder in sub_folders:
+                    print(f"    {folder}")
+            
             self.print_summary()
             return True
         
-        print(f"发现 {len(fit_files)} 个 .fit 文件\n")
+        print(f"发现 {len(activity_files)} 个活动文件\n")
+        
+        # 懒登录 Garmin（有文件才登录，避免空跑时触发限流）
+        if not self.garmin.login():
+            return False
         
         # 处理每个文件
         success_count = 0
         skip_count = 0
         failed_count = 0
         
-        for file_entry in fit_files:
+        for file_entry in activity_files:
             filename = file_entry.name
             file_path = file_entry.path_display
             
