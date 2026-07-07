@@ -92,7 +92,7 @@ class GarminUploader:
         temp_path = None
         try:
             # Garmin library needs file path, not bytes
-            suffix = os.path.splitext(filename)\[1] or '.fit'
+            suffix = os.path.splitext(filename)[1] or '.fit'
             with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
                 tmp.write(file_data)
                 temp_path = tmp.name
