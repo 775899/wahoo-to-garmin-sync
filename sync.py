@@ -15,11 +15,9 @@ class Config:
     GARMIN_PASSWORD = os.getenv('GARMIN_PASSWORD')
     GARMIN_REGION = os.getenv('GARMIN_REGION', 'international')
     
-    # 新版 Refresh Token（自动续期）
     DROPBOX_REFRESH_TOKEN = os.getenv('DROPBOX_REFRESH_TOKEN')
     DROPBOX_APP_KEY = os.getenv('DROPBOX_APP_KEY')
     DROPBOX_APP_SECRET = os.getenv('DROPBOX_APP_SECRET')
-    # 兼容旧版
     DROPBOX_ACCESS_TOKEN = os.getenv('DROPBOX_ACCESS_TOKEN')
     
     DROPBOX_FOLDER = os.getenv('DROPBOX_FOLDER', '/Apps/Wahoo Fitness')
@@ -50,17 +48,17 @@ class SyncState:
             json.dump(self.state, f, indent=2)
     
     def is_processed(self, filename):
-        return filename in self.state\['processed_files']
+        return filename in self.state['processed_files']
     
     def mark_processed(self, filename):
-        if filename not in self.state\['processed_files']:
-            self.state\['processed_files'].append(filename)
-        self.state\['last_sync'] = datetime.now().isoformat()
-        self.state\['total_synced'] += 1
+        if filename not in self.state['processed_files']:
+            self.state['processed_files'].append(filename)
+        self.state['last_sync'] = datetime.now().isoformat()
+        self.state['total_synced'] += 1
         self.save()
     
     def mark_failed(self, filename, error):
-        self.state\['failed_files'].append({
+        self.state['failed_files'].append({
             'filename': filename,
             'error': str(error),
             'timestamp': datetime.now().isoformat()
@@ -78,10 +76,10 @@ class GarminUploader:
         try:
             self.client = Garmin(self.email, self.password)
             self.client.login()
-            print(f"✓ Garmin Connect 登录成功 (区域: {self.region})")
+            print(f"Garmin Connect login successful (region: {self.region})")
             return True
         except Exception as e:
-            print(f"✗ Garmin Connect 登录失败: {e}")
+            print(f"Garmin Connect login failed: {e}")
             return False
     
     def upload_activity(self, file_data, filename):
@@ -92,20 +90,20 @@ class GarminUploader:
         try:
             response = self.client.upload_activity(file_data)
             if response:
-                print(f"  ✓ 上传成功: {filename}")
-                print(f"    活动ID: {response}")
+                print(f"  Upload successful: {filename}")
+                print(f"    Activity ID: {response}")
                 return True
             else:
-                print(f"  ✗ 上传失败: {filename} (无响应)")
+                print(f"  Upload failed: {filename} (no response)")
                 return False
         except Exception as e:
             error_str = str(e)
-            print(f"  ✗ 上传失败: {filename} - {e}")
+            print(f"  Upload failed: {filename} - {e}")
             if 'already' in error_str.lower() or 'duplicate' in error_str.lower():
-                print(f"  → 活动已存在于 Garmin Connect，跳过")
+                print(f"  -> Activity already exists in Garmin Connect, skipping")
                 return True
             if 'login' in error_str.lower() or 'auth' in error_str.lower() or '429' in error_str:
-                print("  → 尝试重新登录...")
+                print("  -> Retrying login...")
                 self.client = None
                 time.sleep(3)
                 return self.upload_activity(file_data, filename)
@@ -121,7 +119,6 @@ class DropboxManager:
         
     def connect(self):
         try:
-            # 新版：Refresh Token 自动续期
             if self.refresh_token and self.app_key and self.app_secret:
                 self.dbx = dropbox.Dropbox(
                     oauth2_refresh_token=self.refresh_token,
@@ -129,35 +126,34 @@ class DropboxManager:
                     app_secret=self.app_secret
                 )
                 account = self.dbx.users_get_current_account()
-                print(f"✓ Dropbox 连接成功（Refresh Token）: {account.name.display_name}")
+                print(f"Dropbox connected (Refresh Token): {account.name.display_name}")
                 return True
             
-            # 兼容旧版
             if self.access_token:
                 self.dbx = dropbox.Dropbox(self.access_token)
                 account = self.dbx.users_get_current_account()
-                print(f"✓ Dropbox 连接成功（Access Token）: {account.name.display_name}")
+                print(f"Dropbox connected (Access Token): {account.name.display_name}")
                 return True
                 
-            print("✗ Dropbox 连接失败: 未配置任何有效的 Token")
+            print("Dropbox connection failed: No valid token configured")
             return False
             
         except dropbox.exceptions.AuthError as e:
-            print(f"✗ Dropbox 连接失败: AuthError - {e}")
+            print(f"Dropbox connection failed: AuthError - {e}")
             if 'expired_access_token' in str(e).lower():
-                print("  → Access Token 已过期，请改用 Refresh Token 方案")
+                print("  -> Access Token expired, please switch to Refresh Token")
             return False
         except Exception as e:
-            print(f"✗ Dropbox 连接失败: {e}")
+            print(f"Dropbox connection failed: {e}")
             return False
     
     def list_activity_files(self, folder_path, recursive=True):
         if not self.dbx:
             if not self.connect():
-                return \[]
+                return []
         
         try:
-            activity_files = \[]
+            activity_files = []
             result = self.dbx.files_list_folder(folder_path, recursive=recursive)
             
             while True:
@@ -174,36 +170,36 @@ class DropboxManager:
             
         except dropbox.exceptions.ApiError as e:
             if 'not_found' in str(e).lower() or 'path' in str(e).lower():
-                print(f"✗ Dropbox 文件夹不存在: {folder_path}")
-                print(f"  请确认 Wahoo App 已连接 Dropbox 并上传过活动文件")
-                print(f"  请检查 GitHub Secret DROPBOX_FOLDER 的路径是否正确")
+                print(f"Dropbox folder not found: {folder_path}")
+                print(f"  Please confirm Wahoo App is connected to Dropbox")
+                print(f"  Check GitHub Secret DROPBOX_FOLDER path")
             else:
-                print(f"✗ 列出文件失败: {e}")
-            return \[]
+                print(f"List files failed: {e}")
+            return []
         except Exception as e:
-            print(f"✗ 列出文件失败: {e}")
-            return \[]
+            print(f"List files failed: {e}")
+            return []
     
     def list_all_folders(self, root_path='/'):
         if not self.dbx:
-            return \[]
+            return []
         try:
             result = self.dbx.files_list_folder(root_path)
-            folders = \[
+            folders = [
                 entry.path_display 
                 for entry in result.entries 
                 if isinstance(entry, dropbox.files.FolderMetadata)
             ]
             return folders
         except Exception:
-            return \[]
+            return []
     
     def download_file(self, file_path):
         try:
             _, response = self.dbx.files_download(file_path)
             return response.content
         except Exception as e:
-            print(f"✗ 下载文件失败 {file_path}: {e}")
+            print(f"Download failed {file_path}: {e}")
             return None
     
     def move_file(self, from_path, to_folder):
@@ -223,14 +219,14 @@ class DropboxManager:
                 self.dbx.files_get_metadata(to_folder)
             except dropbox.exceptions.ApiError:
                 self.dbx.files_create_folder_v2(to_folder)
-                print(f"  → 创建已处理文件夹: {to_folder}")
+                print(f"  -> Created processed folder: {to_folder}")
             
             self.dbx.files_move_v2(from_path, to_path)
-            print(f"  → 文件已移动到: {to_path}")
+            print(f"  -> File moved to: {to_path}")
             return True
             
         except Exception as e:
-            print(f"  ✗ 移动文件失败: {e}")
+            print(f"  Move file failed: {e}")
             return False
 
 class WahooToGarminSync:
@@ -252,14 +248,14 @@ class WahooToGarminSync:
         )
         
         if not has_dropbox:
-            print("✗ 配置错误: 需要设置 Dropbox 认证")
-            print("  推荐方式: DROPBOX_REFRESH_TOKEN + DROPBOX_APP_KEY + DROPBOX_APP_SECRET")
-            print("  兼容方式: DROPBOX_ACCESS_TOKEN（不推荐，会过期）")
-            required\['DROPBOX_AUTH'] = None
+            print("Config error: Dropbox auth required")
+            print("  Recommended: DROPBOX_REFRESH_TOKEN + DROPBOX_APP_KEY + DROPBOX_APP_SECRET")
+            print("  Legacy: DROPBOX_ACCESS_TOKEN (expires in ~4h)")
+            required['DROPBOX_AUTH'] = None
         
-        missing = \[k for k, v in required.items() if not v]
+        missing = [k for k, v in required.items() if not v]
         if missing:
-            print(f"✗ 配置错误: 缺少必要的 Secrets: {', '.join(missing)}")
+            print(f"Config error: Missing required Secrets: {', '.join(missing)}")
             return False
             
         return True
@@ -285,10 +281,10 @@ class WahooToGarminSync:
             return False
         
         print(f"\n{'='*50}")
-        print(f"开始同步: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"Dropbox 路径: {self.config.DROPBOX_FOLDER}")
-        print(f"支持格式: {', '.join(SUPPORTED_FORMATS)}")
-        print(f"递归搜索: {'是' if self.config.RECURSIVE_SEARCH else '否'}")
+        print(f"Sync started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"Dropbox path: {self.config.DROPBOX_FOLDER}")
+        print(f"Supported formats: {', '.join(SUPPORTED_FORMATS)}")
+        print(f"Recursive search: {'Yes' if self.config.RECURSIVE_SEARCH else 'No'}")
         print(f"{'='*50}\n")
         
         activity_files = self.dropbox.list_activity_files(
@@ -297,25 +293,25 @@ class WahooToGarminSync:
         )
         
         if not activity_files:
-            print("ℹ 没有找到新的活动文件")
-            print("\n排查信息:")
+            print("No new activity files found")
+            print("\nTroubleshooting:")
             
             root_folders = self.dropbox.list_all_folders('/')
             if root_folders:
-                print("  Dropbox 根目录下的文件夹:")
+                print("  Dropbox root folders:")
                 for folder in root_folders:
                     print(f"    {folder}")
             
             sub_folders = self.dropbox.list_all_folders(self.config.DROPBOX_FOLDER)
             if sub_folders:
-                print(f"\n  {self.config.DROPBOX_FOLDER} 下的子文件夹:")
+                print(f"\n  Subfolders under {self.config.DROPBOX_FOLDER}:")
                 for folder in sub_folders:
                     print(f"    {folder}")
             
             self.print_summary()
             return True
         
-        print(f"发现 {len(activity_files)} 个活动文件\n")
+        print(f"Found {len(activity_files)} activity files\n")
         
         if not self.garmin.login():
             return False
@@ -328,17 +324,17 @@ class WahooToGarminSync:
             filename = file_entry.name
             file_path = file_entry.path_display
             
-            print(f"处理: {filename}")
+            print(f"Processing: {filename}")
             
             if self.state.is_processed(filename):
-                print(f"  → 跳过: 已同步过")
+                print(f"  -> Skipped: already synced")
                 skip_count += 1
                 continue
             
             file_data = self.dropbox.download_file(file_path)
             if not file_data:
                 failed_count += 1
-                self.state.mark_failed(filename, "下载失败")
+                self.state.mark_failed(filename, "Download failed")
                 continue
             
             if self.garmin.upload_activity(file_data, filename):
@@ -349,7 +345,7 @@ class WahooToGarminSync:
                 self.dropbox.move_file(file_path, processed_folder)
             else:
                 failed_count += 1
-                self.state.mark_failed(filename, "上传失败")
+                self.state.mark_failed(filename, "Upload failed")
             
             time.sleep(2)
         
@@ -358,18 +354,18 @@ class WahooToGarminSync:
     
     def print_summary(self, success=0, skip=0, failed=0):
         print(f"\n{'='*50}")
-        print("同步摘要")
+        print("Sync Summary")
         print(f"{'='*50}")
-        print(f"成功: {success}")
-        print(f"跳过: {skip}")
-        print(f"失败: {failed}")
-        print(f"总计已同步: {self.state.state\['total_synced']}")
-        print(f"最后同步: {self.state.state\['last_sync']}")
+        print(f"Success: {success}")
+        print(f"Skipped: {skip}")
+        print(f"Failed: {failed}")
+        print(f"Total synced: {self.state.state['total_synced']}")
+        print(f"Last sync: {self.state.state['last_sync']}")
         
-        if self.state.state\['failed_files']:
-            print(f"\n最近失败记录:")
-            for fail in self.state.state['failed_files']\[-5:]:
-                print(f"  - {fail\['filename']}: {fail\['error']}")
+        if self.state.state['failed_files']:
+            print(f"\nRecent failures:")
+            for fail in self.state.state['failed_files'][-5:]:
+                print(f"  - {fail['filename']}: {fail['error']}")
         
         print(f"{'='*50}\n")
 
@@ -382,10 +378,10 @@ def main():
             sys.exit(1)
             
     except KeyboardInterrupt:
-        print("\n\n用户中断")
+        print("\n\nInterrupted by user")
         sys.exit(0)
     except Exception as e:
-        print(f"\n✗ 未预期的错误: {e}")
+        print(f"\nUnexpected error: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)
