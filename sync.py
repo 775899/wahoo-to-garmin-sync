@@ -39,10 +39,10 @@ class SyncState:
                 return json.load(f)
         except (FileNotFoundError, json.JSONDecodeError):
             return {
-                'processed_files': \[],
+                'processed_files': [],
                 'last_sync': None,
                 'total_synced': 0,
-                'failed_files': \[]
+                'failed_files': []
             }
     
     def save(self):
