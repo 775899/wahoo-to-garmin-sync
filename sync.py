@@ -20,7 +20,7 @@ class Config:
     DROPBOX_APP_SECRET = os.getenv('DROPBOX_APP_SECRET')
     DROPBOX_ACCESS_TOKEN = os.getenv('DROPBOX_ACCESS_TOKEN')
     
-    DROPBOX_FOLDER = os.getenv('DROPBOX_FOLDER', '/Apps/WahooFitness')
+    DROPBOX_FOLDER = os.getenv('DROPBOX_FOLDER', '/应用/WahooFitness')
     RECURSIVE_SEARCH = os.getenv('RECURSIVE_SEARCH', 'true').lower() == 'true'
     STATE_FILE = 'sync_state.json'
     MAX_RETRIES = 3
