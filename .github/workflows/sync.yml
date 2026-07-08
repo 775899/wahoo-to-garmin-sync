@@ -3,7 +3,7 @@ name: Wahoo to Garmin Sync
 on:
   schedule:
     # 每半小时运行一次（避免Garmin IP限流，节省Actions免费额度）
-    - cron: '*/30 * * * *'
+    - cron: '*/15 * * * *'
   workflow_dispatch:
     # 支持手动触发
 
