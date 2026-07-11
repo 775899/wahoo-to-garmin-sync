@@ -48,9 +48,9 @@ jobs:
         DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
         DROPBOX_APP_SECRET: ${{ secrets.DROPBOX_APP_SECRET }}
         DROPBOX_ACCESS_TOKEN: ${{ secrets.DROPBOX_ACCESS_TOKEN }}
-        # 非敏感配置用 variables，回退到默认值
-        DROPBOX_FOLDER: ${{ vars.DROPBOX_FOLDER || '/Apps/Wahoo Fitness' }}
-        GARMIN_REGION: ${{ vars.GARMIN_REGION || 'international' }}
+        # 非敏感配置优先用 variables，回退到 secrets（兼容旧配置），最后用默认值
+        DROPBOX_FOLDER: ${{ vars.DROPBOX_FOLDER || secrets.DROPBOX_FOLDER || '/Apps/Wahoo Fitness' }}
+        GARMIN_REGION: ${{ vars.GARMIN_REGION || secrets.GARMIN_REGION || 'international' }}
       run: |
         python sync.py
         
