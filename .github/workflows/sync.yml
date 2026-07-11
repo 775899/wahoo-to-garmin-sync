@@ -27,7 +27,11 @@ jobs:
         
     - name: Install dependencies
       run: |
-        pip install -r requirements.txt
+        # 强制清除缓存并重新安装指定版本
+        pip install --no-cache-dir --force-reinstall garminconnect==0.2.15
+        pip install --no-cache-dir dropbox>=11.0.0 python-dotenv>=1.0.0
+        # 打印版本信息，确认安装的是 0.2.15
+        pip show garminconnect
         
     # 恢复上次同步状态（去重用）
     - name: Download previous sync state
