@@ -20,7 +20,7 @@ class Config:
     DROPBOX_APP_SECRET = os.getenv('DROPBOX_APP_SECRET')
     DROPBOX_ACCESS_TOKEN = os.getenv('DROPBOX_ACCESS_TOKEN')
     
-    DROPBOX_FOLDER = os.getenv('DROPBOX_FOLDER', '/应用/WahooFitness')
+    DROPBOX_FOLDER = os.getenv('DROPBOX_FOLDER', '/Apps/Wahoo Fitness')
     RECURSIVE_SEARCH = os.getenv('RECURSIVE_SEARCH', 'true').lower() == 'true'
     STATE_FILE = 'sync_state.json'
     MAX_RETRIES = 3
@@ -74,9 +74,15 @@ class GarminUploader:
         
     def login(self):
         try:
-            self.client = Garmin(self.email, self.password)
+            # 根据 region 参数选择正确的域名
+            if self.region == 'china':
+                domain = 'garmin.cn'
+            else:
+                domain = 'garmin.com'
+            
+            self.client = Garmin(self.email, self.password, domain=domain)
             self.client.login()
-            print(f"Garmin Connect login successful (region: {self.region})")
+            print(f"Garmin Connect login successful (region: {self.region}, domain: {domain})")
             return True
         except Exception as e:
             print(f"Garmin Connect login failed: {e}")
