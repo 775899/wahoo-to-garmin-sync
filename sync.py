@@ -74,18 +74,17 @@ class GarminUploader:
         
     def login(self):
         try:
-            # 根据 region 选择不同的 API 端点 URL
-            if self.region == 'china':
-                # 国区 API 端点
-                api_url = 'https://connect.garmin.cn'
-                print(f"Garmin region set to: china ({api_url})")
-            else:
-                # 国际区 API 端点
-                api_url = 'https://connect.garmin.com'
-                print(f"Garmin region set to: international ({api_url})")
+            # 先创建客户端
+            self.client = Garmin(self.email, self.password)
             
-            # 使用 url 参数创建客户端
-            self.client = Garmin(self.email, self.password, url=api_url)
+            # 根据 region 设置环境变量（在代码中直接修改 os.environ）
+            if self.region == 'china':
+                os.environ['GARMIN_CONNECT_DOMAIN'] = 'garmin.cn'
+                print(f"Garmin region set to: china (garmin.cn)")
+            else:
+                os.environ['GARMIN_CONNECT_DOMAIN'] = 'garmin.com'
+                print(f"Garmin region set to: international (garmin.com)")
+            
             self.client.login()
             print(f"Garmin Connect login successful")
             return True
@@ -102,7 +101,6 @@ class GarminUploader:
         import tempfile
         temp_path = None
         try:
-            # Garmin library needs file path, not bytes
             suffix = os.path.splitext(filename)[1] or '.fit'
             with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
                 tmp.write(file_data)
@@ -134,7 +132,6 @@ class GarminUploader:
             return False
             
         finally:
-            # Clean up temp file
             if temp_path and os.path.exists(temp_path):
                 os.unlink(temp_path)
 
