@@ -145,6 +145,7 @@ GitHub Actions 每月有 **2000 分钟** 免费额度：
 - 确认邮箱密码正确
 - Garmin 可能启用了两步验证，需要在账号设置中生成应用专用密码
 - 国区账号和国际区账号不能混用
+- **国区用户注意**：Garmin 国区 (`garmin.cn`) 使用 Cloudflare 保护，标准 Python HTTP 库会被拦截。本项目使用 `curl_cffi` 进行 Chrome TLS 指纹伪装来绕过 Cloudflare，无需额外配置
 
 **Q: 如何避免重复上传？**
 - 脚本内置去重机制，通过文件名记录已同步的活动
@@ -209,6 +210,7 @@ GARMIN_REGION=china
 
 - **2026-07-07**: 初始版本，支持 Dropbox → Garmin 自动同步
 - **2026-07-11**: 修复 Garmin 国区登录（改用 `is_cn` 参数）；状态持久化改用 actions/cache；README 更新 Refresh Token 说明
+- **2026-07-11**: 国区登录改用 `curl_cffi`（Chrome TLS 指纹）绕过 Cloudflare 保护；国区上传改用 session-based `/gc-api/` 代理；增加完整错误堆栈输出
 
 ## 许可证
 

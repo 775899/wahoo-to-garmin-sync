@@ -1,10 +1,12 @@
 import os
+import re
+import io
 import json
 import sys
 import time
+import traceback
 from pathlib import Path
 from datetime import datetime, timedelta
-from garminconnect import Garmin
 import dropbox
 from dropbox.files import WriteMode
 
@@ -66,38 +68,171 @@ class SyncState:
         self.save()
 
 class GarminUploader:
+    """Garmin Connect uploader.
+
+    For China region (garmin.cn): uses curl_cffi with Chrome TLS fingerprint
+    impersonation to bypass Cloudflare protection on sso.garmin.cn.
+    The standard garminconnect/garth stack uses Python `requests` which gets
+    blocked by Cloudflare, resulting in empty-error login failures.
+
+    For international region (garmin.com): uses the garminconnect library.
+    """
+
     def __init__(self, email, password, region='international'):
         self.email = email
         self.password = password
         self.region = region
+        self.is_cn = (region == 'china')
+        # CN: curl_cffi session + CSRF token
+        self.session = None
+        self.csrf_token = None
+        # International: garminconnect client
         self.client = None
-        
+
+    # ── Login ──────────────────────────────────────────────────────
+
     def login(self):
+        if self.is_cn:
+            return self._login_cn()
+        else:
+            return self._login_international()
+
+    def _login_cn(self):
+        """Login to Garmin CN via curl_cffi (bypasses Cloudflare)."""
         try:
-            # 通过 is_cn 参数让 garminconnect 库在构造时选择正确的域名
-            # garminconnect 源码: domain="garmin.cn" if is_cn else "garmin.com"
-            # 注意: 必须在创建客户端时传入，创建后再设环境变量无效
-            is_cn = (self.region == 'china')
-            self.client = Garmin(self.email, self.password, is_cn=is_cn)
+            from curl_cffi.requests import Session as CffiSession
 
-            if is_cn:
-                print(f"Garmin region set to: china (garmin.cn)")
-            else:
-                print(f"Garmin region set to: international (garmin.com)")
+            print(f"Garmin region set to: china (garmin.cn)")
+            print(f"  Using curl_cffi (Chrome TLS fingerprint) to bypass Cloudflare")
 
+            self.session = CffiSession(impersonate="chrome", timeout=30)
+
+            # Step 1: SSO login via mobile API
+            r = self.session.post(
+                "https://sso.garmin.cn/mobile/api/login",
+                params={
+                    "clientId": "GCM_ANDROID_DARK",
+                    "service": "https://connect.garmin.cn/modern",
+                },
+                json={
+                    "username": self.email,
+                    "password": self.password,
+                    "rememberMe": True,
+                    "captchaToken": "",
+                },
+                timeout=30,
+            )
+
+            # Check if response is JSON (Cloudflare might return HTML challenge)
+            try:
+                data = r.json()
+            except Exception:
+                print(f"Garmin Connect login failed: Non-JSON response (HTTP {r.status_code})")
+                print(f"  Response preview: {r.text[:300]}")
+                return False
+
+            resp_status = data.get("responseStatus", {})
+            resp_type = resp_status.get("type")
+
+            if resp_type != "SUCCESSFUL":
+                msg = resp_status.get("message", "unknown error")
+                print(f"Garmin Connect login failed: SSO error - {resp_type}: {msg}")
+                return False
+
+            ticket = data["serviceTicketId"]
+
+            # Step 2: Exchange ticket for session cookies
+            r = self.session.get(
+                "https://connect.garmin.cn/modern",
+                params={"ticket": ticket},
+                allow_redirects=True,
+                timeout=30,
+            )
+
+            # Step 3: Extract CSRF token from page
+            csrf_match = re.search(
+                r'<meta[^>]*name=["\']csrf-token["\'][^>]*content=["\']([^"\']+)',
+                r.text,
+            )
+            self.csrf_token = csrf_match.group(1) if csrf_match else ""
+
+            if not self.csrf_token:
+                print(f"  Warning: CSRF token not found (uploads may fail)")
+
+            print(f"Garmin Connect login successful (CN)")
+            return True
+
+        except Exception as e:
+            print(f"Garmin Connect login failed: {type(e).__name__}: {e}")
+            traceback.print_exc()
+            return False
+
+    def _login_international(self):
+        """Login to Garmin International via garminconnect library."""
+        try:
+            from garminconnect import Garmin
+
+            print(f"Garmin region set to: international (garmin.com)")
+            self.client = Garmin(self.email, self.password, is_cn=False)
             self.client.login()
             print(f"Garmin Connect login successful")
             return True
         except Exception as e:
-            print(f"Garmin Connect login failed: {e}")
+            print(f"Garmin Connect login failed: {type(e).__name__}: {e}")
+            traceback.print_exc()
             return False
-    
+
+    # ── Upload ─────────────────────────────────────────────────────
+
     def upload_activity(self, file_data, filename):
-        """Upload activity to Garmin Connect (save bytes to temp file first)"""
+        """Upload activity file to Garmin Connect."""
+        if self.is_cn:
+            return self._upload_cn(file_data, filename)
+        else:
+            return self._upload_international(file_data, filename)
+
+    def _upload_cn(self, file_data, filename):
+        """Upload to Garmin CN via session-based API."""
+        if not self.session:
+            if not self.login():
+                return False
+
+        try:
+            upload_url = "https://connect.garmin.cn/gc-api/upload-service/upload"
+            files = {"file": (filename, io.BytesIO(file_data))}
+            headers = {
+                "Accept": "application/json",
+                "connect-csrf-token": self.csrf_token or "",
+            }
+
+            r = self.session.post(upload_url, files=files, headers=headers, timeout=60)
+
+            if r.status_code in (200, 201):
+                print(f"  Upload successful: {filename}")
+                return True
+            elif r.status_code == 409:
+                print(f"  -> Activity already exists in Garmin Connect, skipping")
+                return True
+            elif r.status_code == 401:
+                print(f"  -> Session expired, retrying login...")
+                self.session = None
+                self.csrf_token = None
+                time.sleep(3)
+                return self._upload_cn(file_data, filename)
+            else:
+                print(f"  Upload failed: {filename} - HTTP {r.status_code}: {r.text[:200]}")
+                return False
+
+        except Exception as e:
+            print(f"  Upload failed: {filename} - {type(e).__name__}: {e}")
+            return False
+
+    def _upload_international(self, file_data, filename):
+        """Upload to Garmin International via garminconnect library."""
         if not self.client:
             if not self.login():
                 return False
-        
+
         import tempfile
         temp_path = None
         try:
@@ -105,9 +240,9 @@ class GarminUploader:
             with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
                 tmp.write(file_data)
                 temp_path = tmp.name
-            
+
             response = self.client.upload_activity(temp_path)
-            
+
             if response:
                 print(f"  Upload successful: {filename}")
                 print(f"    Activity ID: {response}")
@@ -115,22 +250,22 @@ class GarminUploader:
             else:
                 print(f"  Upload failed: {filename} (no response)")
                 return False
-                
+
         except Exception as e:
             error_str = str(e)
             print(f"  Upload failed: {filename} - {e}")
-            
+
             if 'already' in error_str.lower() or 'duplicate' in error_str.lower():
                 print(f"  -> Activity already exists in Garmin Connect, skipping")
                 return True
-            
+
             if 'login' in error_str.lower() or 'auth' in error_str.lower() or '429' in error_str:
                 print("  -> Retrying login...")
                 self.client = None
                 time.sleep(3)
-                return self.upload_activity(file_data, filename)
+                return self._upload_international(file_data, filename)
             return False
-            
+
         finally:
             if temp_path and os.path.exists(temp_path):
                 os.unlink(temp_path)
