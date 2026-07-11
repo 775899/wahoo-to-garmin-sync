@@ -74,15 +74,19 @@ class GarminUploader:
         
     def login(self):
         try:
-            # 根据 region 参数选择正确的域名
-            if self.region == 'china':
-                domain = 'garmin.cn'
-            else:
-                domain = 'garmin.com'
+            # 先创建客户端（不传 domain 参数，兼容 0.3.x 版本）
+            self.client = Garmin(self.email, self.password)
             
-            self.client = Garmin(self.email, self.password, domain=domain)
+            # 根据 region 手动设置 domain 属性
+            if self.region == 'china':
+                self.client.domain = 'garmin.cn'
+                print(f"Garmin region set to: china (garmin.cn)")
+            else:
+                self.client.domain = 'garmin.com'
+                print(f"Garmin region set to: international (garmin.com)")
+            
             self.client.login()
-            print(f"Garmin Connect login successful (region: {self.region}, domain: {domain})")
+            print(f"Garmin Connect login successful")
             return True
         except Exception as e:
             print(f"Garmin Connect login failed: {e}")
