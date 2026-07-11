@@ -25,7 +25,9 @@
 3. 点击 **Dropbox**，完成授权
 4. 授权后，Wahoo 会自动将每次活动的 `.fit` 文件上传到 `/Apps/Wahoo Fitness` 文件夹
 
-### 2. 创建 Dropbox Access Token
+### 2. 创建 Dropbox 应用凭据
+
+推荐使用 **Refresh Token**（长期有效），不建议用 Access Token（约 4 小时过期）。
 
 1. 访问 [Dropbox App Console](https://www.dropbox.com/developers/apps)
 2. 点击 **Create app**
@@ -36,26 +38,48 @@
 4. 在 Permissions 标签页，勾选：
    - `files.content.read`
    - `files.content.write`
-5. 点击 **Generate access token**，复制生成的令牌
+5. 记下 **App key** 和 **App secret**（在 Settings 页面）
+6. 生成 Refresh Token（任选一种方式）：
+   - **方式一（推荐，命令行）**：
+     ```bash
+     # 替换 YOUR_APP_KEY 和 YOUR_APP_SECRET
+     curl -X POST https://api.dropbox.com/oauth2/token \
+       -d grant_type=authorization_code \
+       -d code=YOUR_AUTH_CODE \
+       -u "YOUR_APP_KEY:YOUR_APP_SECRET"
+     ```
+     其中 `YOUR_AUTH_CODE` 需先在浏览器访问以下 URL 获取（登录 Dropbox 授权后拿到 code）：
+     ```
+     https://www.dropbox.com/oauth2/authorize?client_id=YOUR_APP_KEY&token_access_type=offline&response_type=code
+     ```
+   - **方式二**：使用 [Dropbox OAuth Token Generator](https://dropbox.github.io/dropbox-api-v2-explorer/) 生成
 
 ### 3. Fork 本仓库并配置 Secrets
 
 1. Fork 本仓库到你的 GitHub 账号
 2. 进入仓库 → **Settings** → **Secrets and variables** → **Actions**
-3. 添加以下 Repository secrets：
+3. 添加以下 Repository secrets（敏感信息）：
 
 | Secret 名称 | 说明 | 示例 |
 |------------|------|------|
 | `GARMIN_EMAIL` | Garmin Connect 登录邮箱 | `your@email.com` |
 | `GARMIN_PASSWORD` | Garmin Connect 登录密码 | `yourpassword` |
-| `DROPBOX_ACCESS_TOKEN` | Dropbox Access Token | `sl.xxx...` |
-| `DROPBOX_FOLDER` | Wahoo 上传路径 | `/Apps/Wahoo Fitness` |
-| `GARMIN_REGION` | Garmin 区域 | `international` 或 `china` |
+| `DROPBOX_REFRESH_TOKEN` | Dropbox Refresh Token（长期有效） | `a-long-token-string` |
+| `DROPBOX_APP_KEY` | Dropbox App Key | `abc123xyz` |
+| `DROPBOX_APP_SECRET` | Dropbox App Secret | `def456uvw` |
+
+4. 添加以下 Repository variables（非敏感配置，在 **Variables** 标签页添加，不是 Secrets）：
+
+| Variable 名称 | 说明 | 默认值 | 示例 |
+|---------------|------|--------|------|
+| `DROPBOX_FOLDER` | Wahoo 上传路径 | `/Apps/Wahoo Fitness` | `/Apps/Wahoo Fitness` |
+| `GARMIN_REGION` | Garmin 区域 | `international` | `china` |
 
 **注意事项：**
 - 国区 Garmin 账号（`connect.garmin.cn`）设置 `GARMIN_REGION=china`
 - 国际区账号（`connect.garmin.com`）设置 `GARMIN_REGION=international`
 - Dropbox 路径默认是 `/Apps/Wahoo Fitness`，如果 Wahoo 使用了不同路径请修改
+- 如果你只有短期 Access Token 也可以用 `DROPBOX_ACCESS_TOKEN`（放到 Secrets），但约 4 小时后过期，推荐用 Refresh Token
 
 ### 4. 手动测试
 
@@ -113,8 +137,9 @@ GitHub Actions 每月有 **2000 分钟** 免费额度：
 - 可能是 `.fit` 文件格式问题，尝试手动在 Garmin Connect 网页端上传同一个文件验证
 
 **Q: Dropbox 连接失败？**
-- 确认 Access Token 没有过期（Dropbox 长期令牌不会过期，但短令牌需要定期刷新）
-- 检查令牌是否有 `files.content.read` 和 `files.content.write` 权限
+- 如果用 Access Token：确认未过期（约 4 小时有效期），过期后需重新生成
+- 推荐切换到 Refresh Token 方式（长期有效，不会过期）
+- 检查令牌/凭据是否有 `files.content.read` 和 `files.content.write` 权限
 
 **Q: Garmin 登录失败？**
 - 确认邮箱密码正确
@@ -144,7 +169,10 @@ pip install garminconnect dropbox python-dotenv
 # 设置环境变量
 export GARMIN_EMAIL="your@email.com"
 export GARMIN_PASSWORD="yourpassword"
-export DROPBOX_ACCESS_TOKEN="sl.xxx..."
+export DROPBOX_REFRESH_TOKEN="your-refresh-token"
+export DROPBOX_APP_KEY="your-app-key"
+export DROPBOX_APP_SECRET="your-app-secret"
+export GARMIN_REGION="china"
 
 # 运行
 python sync.py
@@ -154,7 +182,10 @@ Windows PowerShell:
 ```powershell
 $env:GARMIN_EMAIL="your@email.com"
 $env:GARMIN_PASSWORD="yourpassword"
-$env:DROPBOX_ACCESS_TOKEN="sl.xxx..."
+$env:DROPBOX_REFRESH_TOKEN="your-refresh-token"
+$env:DROPBOX_APP_KEY="your-app-key"
+$env:DROPBOX_APP_SECRET="your-app-secret"
+$env:GARMIN_REGION="china"
 python sync.py
 ```
 
@@ -165,9 +196,11 @@ python sync.py
 ```env
 GARMIN_EMAIL=your@email.com
 GARMIN_PASSWORD=yourpassword
-DROPBOX_ACCESS_TOKEN=sl.xxx...
+DROPBOX_REFRESH_TOKEN=your-refresh-token
+DROPBOX_APP_KEY=your-app-key
+DROPBOX_APP_SECRET=your-app-secret
 DROPBOX_FOLDER=/Apps/Wahoo Fitness
-GARMIN_REGION=international
+GARMIN_REGION=china
 ```
 
 **注意：** `.env` 文件已加入 `.gitignore`，不会被提交到 GitHub。
@@ -175,6 +208,7 @@ GARMIN_REGION=international
 ## 更新日志
 
 - **2026-07-07**: 初始版本，支持 Dropbox → Garmin 自动同步
+- **2026-07-11**: 修复 Garmin 国区登录（改用 `is_cn` 参数）；状态持久化改用 actions/cache；README 更新 Refresh Token 说明
 
 ## 许可证
 

@@ -4,7 +4,7 @@ import sys
 import time
 from pathlib import Path
 from datetime import datetime, timedelta
-from garminconnect import Garmin, GarminConnectClient
+from garminconnect import Garmin
 import dropbox
 from dropbox.files import WriteMode
 
@@ -74,14 +74,17 @@ class GarminUploader:
         
     def login(self):
         try:
-            # 使用 GarminConnectClient 并传入 domain 参数
-            if self.region == 'china':
+            # 通过 is_cn 参数让 garminconnect 库在构造时选择正确的域名
+            # garminconnect 源码: domain="garmin.cn" if is_cn else "garmin.com"
+            # 注意: 必须在创建客户端时传入，创建后再设环境变量无效
+            is_cn = (self.region == 'china')
+            self.client = Garmin(self.email, self.password, is_cn=is_cn)
+
+            if is_cn:
                 print(f"Garmin region set to: china (garmin.cn)")
-                self.client = GarminConnectClient(self.email, self.password, domain='garmin.cn')
             else:
                 print(f"Garmin region set to: international (garmin.com)")
-                self.client = GarminConnectClient(self.email, self.password, domain='garmin.com')
-            
+
             self.client.login()
             print(f"Garmin Connect login successful")
             return True
