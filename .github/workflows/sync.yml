@@ -27,19 +27,18 @@ jobs:
         
     - name: Install dependencies
       run: |
-        # 强制清除缓存并重新安装指定版本
-        pip install --no-cache-dir --force-reinstall garminconnect==0.2.15
-        pip install --no-cache-dir dropbox>=11.0.0 python-dotenv>=1.0.0
-        # 打印版本信息，确认安装的是 0.2.15
-        pip show garminconnect
+        pip install -r requirements.txt
         
     # 恢复上次同步状态（去重用）
-    - name: Download previous sync state
-      uses: actions/download-artifact@v4
-      continue-on-error: true
+    # v4 artifact 无法跨 run 下载，改用 cache 持久化 sync_state.json
+    - name: Restore sync state
+      uses: actions/cache@v4
       with:
-        name: sync-state
-        path: .
+        path: sync_state.json
+        key: sync-state
+        # 每次都命中旧缓存（restore-keys 兜底），写回时更新
+        restore-keys: |
+          sync-state
         
     - name: Run sync script
       env:
@@ -49,15 +48,15 @@ jobs:
         DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
         DROPBOX_APP_SECRET: ${{ secrets.DROPBOX_APP_SECRET }}
         DROPBOX_ACCESS_TOKEN: ${{ secrets.DROPBOX_ACCESS_TOKEN }}
-        DROPBOX_FOLDER: ${{ secrets.DROPBOX_FOLDER }}
-        GARMIN_REGION: ${{ secrets.GARMIN_REGION }}
+        # 非敏感配置用 variables，回退到默认值
+        DROPBOX_FOLDER: ${{ vars.DROPBOX_FOLDER || '/Apps/Wahoo Fitness' }}
+        GARMIN_REGION: ${{ vars.GARMIN_REGION || 'international' }}
       run: |
         python sync.py
         
-    - name: Save processed files tracking
-      uses: actions/upload-artifact@v4
+    - name: Save sync state
+      uses: actions/cache@v4
       if: always()
       with:
-        name: sync-state
         path: sync_state.json
-        retention-days: 90
+        key: sync-state
