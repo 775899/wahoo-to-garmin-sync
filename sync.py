@@ -1,6 +1,5 @@
 import os
 import re
-import io
 import json
 import sys
 import time
@@ -198,14 +197,22 @@ class GarminUploader:
                 return False
 
         try:
+            from curl_cffi import CurlMime
+
             upload_url = "https://connect.garmin.cn/gc-api/upload-service/upload"
-            files = {"file": (filename, io.BytesIO(file_data))}
+            mp = CurlMime()
+            mp.addpart(
+                name="file",
+                filename=filename,
+                content_type="application/octet-stream",
+                data=file_data,
+            )
             headers = {
                 "Accept": "application/json",
                 "connect-csrf-token": self.csrf_token or "",
             }
 
-            r = self.session.post(upload_url, files=files, headers=headers, timeout=60)
+            r = self.session.post(upload_url, multipart=mp, headers=headers, timeout=60)
 
             if r.status_code in (200, 201):
                 print(f"  Upload successful: {filename}")
