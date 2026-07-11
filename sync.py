@@ -206,18 +206,45 @@ class DropboxManager:
             print(f"List files failed: {e}")
             return []
     
-    def list_all_folders(self, root_path='/'):
+    def list_all_folders(self, root_path='/', recursive=False):
         if not self.dbx:
             return []
         try:
-            result = self.dbx.files_list_folder(root_path)
+            result = self.dbx.files_list_folder(root_path, recursive=recursive)
             folders = [
-                entry.path_display 
-                for entry in result.entries 
+                entry.path_display
+                for entry in result.entries
                 if isinstance(entry, dropbox.files.FolderMetadata)
             ]
+            while result.has_more:
+                result = self.dbx.files_list_folder_continue(result.cursor)
+                folders.extend(
+                    entry.path_display
+                    for entry in result.entries
+                    if isinstance(entry, dropbox.files.FolderMetadata)
+                )
             return folders
         except Exception:
+            return []
+
+    def search_activity_files_everywhere(self):
+        """递归搜索整个 Dropbox 中的活动文件（用于 fallback）"""
+        if not self.dbx:
+            return []
+        try:
+            activity_files = []
+            result = self.dbx.files_list_folder('', recursive=True)
+            while True:
+                for entry in result.entries:
+                    if isinstance(entry, dropbox.files.FileMetadata):
+                        if entry.name.lower().endswith(SUPPORTED_FORMATS):
+                            activity_files.append(entry)
+                if not result.has_more:
+                    break
+                result = self.dbx.files_list_folder_continue(result.cursor)
+            return activity_files
+        except Exception as e:
+            print(f"  Global search failed: {e}")
             return []
     
     def download_file(self, file_path):
@@ -321,19 +348,37 @@ class WahooToGarminSync:
         if not activity_files:
             print("No new activity files found")
             print("\nTroubleshooting:")
-            
+
+            # 列出根目录下的文件夹
             root_folders = self.dropbox.list_all_folders('/')
             if root_folders:
                 print("  Dropbox root folders:")
                 for folder in root_folders:
                     print(f"    {folder}")
-            
-            sub_folders = self.dropbox.list_all_folders(self.config.DROPBOX_FOLDER)
-            if sub_folders:
-                print(f"\n  Subfolders under {self.config.DROPBOX_FOLDER}:")
-                for folder in sub_folders:
-                    print(f"    {folder}")
-            
+
+                # 递归列出子文件夹，帮用户找到正确路径
+                all_folders = self.dropbox.list_all_folders('/', recursive=True)
+                if all_folders:
+                    print(f"\n  All folders (recursive):")
+                    for folder in sorted(all_folders):
+                        print(f"    {folder}")
+
+            # 全局搜索 .fit/.gpx/.tcx 文件
+            print(f"\n  Searching entire Dropbox for activity files...")
+            global_files = self.dropbox.search_activity_files_everywhere()
+            if global_files:
+                print(f"  Found {len(global_files)} activity file(s) in Dropbox:")
+                for f in global_files[:20]:
+                    print(f"    {f.path_display}")
+                if len(global_files) > 20:
+                    print(f"    ... and {len(global_files) - 20} more")
+                # 提示用户正确的路径
+                parent = os.path.dirname(global_files[0].path_display)
+                print(f"\n  >>> Try setting DROPBOX_FOLDER to: {parent}")
+            else:
+                print("  No .fit/.gpx/.tcx files found anywhere in Dropbox")
+                print("  Please confirm Wahoo App is connected to Dropbox and has uploaded activities")
+
             self.print_summary()
             return True
         
