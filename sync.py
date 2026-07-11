@@ -74,17 +74,18 @@ class GarminUploader:
         
     def login(self):
         try:
-            # 先创建客户端（不传 domain 参数，兼容 0.3.x 版本）
-            self.client = Garmin(self.email, self.password)
-            
-            # 根据 region 手动设置 domain 属性
+            # 根据 region 选择不同的 API 端点 URL
             if self.region == 'china':
-                self.client.domain = 'garmin.cn'
-                print(f"Garmin region set to: china (garmin.cn)")
+                # 国区 API 端点
+                api_url = 'https://connect.garmin.cn'
+                print(f"Garmin region set to: china ({api_url})")
             else:
-                self.client.domain = 'garmin.com'
-                print(f"Garmin region set to: international (garmin.com)")
+                # 国际区 API 端点
+                api_url = 'https://connect.garmin.com'
+                print(f"Garmin region set to: international ({api_url})")
             
+            # 使用 url 参数创建客户端
+            self.client = Garmin(self.email, self.password, url=api_url)
             self.client.login()
             print(f"Garmin Connect login successful")
             return True
